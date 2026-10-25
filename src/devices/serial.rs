@@ -23,10 +23,11 @@ pub const COM1_IRQ: u32 = 4;
 
 /// The UART's interrupt output, as an eventfd.
 ///
-/// In M1 nothing listens to this eventfd yet: without an in-kernel
-/// interrupt controller there is nowhere to deliver an interrupt. In M2
-/// the eventfd is registered with KVM as an irqfd for [`COM1_IRQ`], so a
-/// trigger becomes a guest interrupt without leaving the kernel.
+/// For a Linux guest the eventfd is registered with KVM as an irqfd for
+/// [`COM1_IRQ`], so a trigger becomes a guest interrupt without a trip
+/// through user space: the write to the eventfd wakes KVM, which raises the
+/// line on the in-kernel interrupt controller. A real-mode guest has no
+/// interrupt controller, so there nothing listens to the eventfd.
 pub struct IrqLine {
     evt: EventFd,
 }
@@ -39,7 +40,7 @@ impl IrqLine {
         })
     }
 
-    /// The eventfd, for registering as an irqfd (M2).
+    /// The eventfd, for registering as an irqfd.
     pub fn eventfd(&self) -> &EventFd {
         &self.evt
     }
@@ -61,6 +62,7 @@ pub struct SerialConsole<W: Write + Send> {
     /// (for example a closed stdout) must never stop the guest.
     lost_bytes: u64,
     warned_lost: bool,
+    warned_irq: bool,
 }
 
 impl<W: Write + Send> SerialConsole<W> {
@@ -70,6 +72,7 @@ impl<W: Write + Send> SerialConsole<W> {
             uart: Serial::new(irq, out),
             lost_bytes: 0,
             warned_lost: false,
+            warned_irq: false,
         }
     }
 
@@ -81,6 +84,28 @@ impl<W: Write + Send> SerialConsole<W> {
     /// The host-side writer (tests read it back).
     pub fn writer(&self) -> &W {
         self.uart.writer()
+    }
+
+    /// Queue bytes typed on the host for the guest to read, and raise the
+    /// "data available" interrupt if the guest enabled it.
+    ///
+    /// Returns how many bytes were queued: fewer than `input.len()` (maybe
+    /// 0) when the UART's 64-byte receive FIFO is full because the guest
+    /// has not read it yet. The caller keeps the rest and tries again.
+    pub fn enqueue_input(&mut self, input: &[u8]) -> usize {
+        let n = input.len().min(self.uart.fifo_capacity());
+        if n == 0 {
+            return 0;
+        }
+        // With room checked above, the only possible error is from the
+        // interrupt eventfd. The bytes are queued either way.
+        if let Err(err) = self.uart.enqueue_raw_bytes(&input[..n]) {
+            if !self.warned_irq {
+                self.warned_irq = true;
+                eprintln!("minivmm: serial interrupt failed ({err:?}); input may be delayed");
+            }
+        }
+        n
     }
 }
 
@@ -167,6 +192,44 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    const RBR: u64 = 0; // receive buffer register (DLAB = 0)
+    const IER: u64 = 1; // interrupt enable register
+    const LSR_DATA_READY: u8 = 0x01;
+
+    #[test]
+    fn input_reaches_the_guest_and_raises_an_interrupt() {
+        let mut c = console();
+        c.write(IER, &[0x01]); // enable the "received data" interrupt
+        assert_eq!(c.enqueue_input(b"ls\n"), 3);
+
+        let irq = c.uart.interrupt_evt().eventfd().read().unwrap();
+        assert!(irq >= 1, "the guest must be told data arrived");
+
+        let mut lsr = [0u8];
+        c.read(LSR, &mut lsr);
+        assert_ne!(lsr[0] & LSR_DATA_READY, 0);
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            let mut b = [0u8];
+            c.read(RBR, &mut b);
+            got.push(b[0]);
+        }
+        assert_eq!(got, b"ls\n");
+        c.read(LSR, &mut lsr);
+        assert_eq!(lsr[0] & LSR_DATA_READY, 0, "FIFO drained");
+    }
+
+    #[test]
+    fn a_full_receive_fifo_takes_only_what_fits() {
+        let mut c = console();
+        let big = [b'x'; 100];
+        assert_eq!(c.enqueue_input(&big), 64);
+        assert_eq!(c.enqueue_input(b"more"), 0);
+        let mut b = [0u8];
+        c.read(RBR, &mut b);
+        assert_eq!(c.enqueue_input(b"more"), 1, "one byte read, one slot free");
     }
 
     #[test]

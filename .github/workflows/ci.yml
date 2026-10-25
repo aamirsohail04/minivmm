@@ -14,7 +14,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: sudo apt-get update && sudo apt-get install -y nasm
+      - run: sudo apt-get update && sudo apt-get install -y nasm busybox-static cpio
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # Keep the guest initramfs script working (the boot tests that use it
+      # need KVM, so they skip here).
+      - run: ./scripts/make-initramfs.sh /tmp/initramfs.cpio.gz

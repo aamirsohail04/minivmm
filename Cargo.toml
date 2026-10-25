@@ -1,6 +1,6 @@
 [package]
 name = "minivmm"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Aamir Sohail"]
 edition = "2024"
 rust-version = "1.85"
@@ -21,6 +21,7 @@ clap = { version = "4", features = ["derive"] }
 kvm-bindings = "0.14"
 kvm-ioctls = "0.25"
 libc = "0.2"
+linux-loader = { version = "0.14", features = ["bzimage"] }
 vm-memory = { version = "0.18", features = ["backend-mmap"] }
 vm-superio = "0.8"
 vmm-sys-util = "0.15"

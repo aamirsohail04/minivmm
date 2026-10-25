@@ -1,2 +1,6 @@
 /target
 *.bin
+# Linux guest files (see "Boot Linux" in README.md); not part of the repository
+/guest/bzImage
+/guest/*.cpio
+/guest/*.cpio.gz

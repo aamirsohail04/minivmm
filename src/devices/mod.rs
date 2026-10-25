@@ -3,7 +3,9 @@
 
 //! Emulated devices.
 //!
-//! M1 has only the legacy serial console. virtio-mmio block and network
-//! devices arrive in M3 and M5.
+//! M2 has the legacy serial console and the keyboard controller's reset
+//! line. The interrupt controllers and the timer (PIT) are emulated inside
+//! KVM. virtio-mmio block and network devices arrive in M3 and M5.
 
+pub mod i8042;
 pub mod serial;

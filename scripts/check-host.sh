@@ -92,8 +92,29 @@ else
 fi
 
 echo
+echo "Linux guest (milestone M2, optional)"
+bb=$(command -v busybox || true)
+if [ -n "$bb" ] && ! ldd "$bb" >/dev/null 2>&1 && command -v cpio >/dev/null 2>&1; then
+    pass "static busybox and cpio present (for scripts/make-initramfs.sh)"
+else
+    note "to build the initramfs: sudo apt install busybox-static cpio"
+fi
+here=$(cd "$(dirname "$0")/.." && pwd)
+if [ -r "$here/guest/bzImage" ]; then
+    pass "guest kernel guest/bzImage present"
+else
+    note "no guest/bzImage yet: sudo cp /boot/vmlinuz-\$(uname -r) guest/bzImage && sudo chown \$USER: guest/bzImage"
+fi
+if [ -r "$here/guest/initramfs.cpio.gz" ]; then
+    pass "guest initramfs guest/initramfs.cpio.gz present"
+else
+    note "no guest/initramfs.cpio.gz yet: ./scripts/make-initramfs.sh"
+fi
+
+echo
 if [ "$fails" -eq 0 ]; then
     echo "READY: run 'cargo test' and 'cargo run' in the minivmm folder."
+    echo "       Boot Linux: see \"Boot Linux (M2)\" in README.md."
     exit 0
 fi
 echo "NOT READY: $fails check(s) failed. Fix them and run this script again."
